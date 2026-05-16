@@ -2,101 +2,256 @@ Shader "Custom/TriplanarSimple"
 {
     Properties
     {
-        _Color ("Color", Color) = (1,1,1,1)        
+        _Color ("Color", Color) = (1,1,1,1)
         _SliceRange ("Slices", Range(0,16)) = 6
         _MainTextures ("Albedo Textures", 2DArray) = "" {}
-        //_BumpMaps("Normal textures", 2DArray) = "" {}
         _Glossiness ("Smoothness", Range(0,1)) = 0.5
         _Metallic ("Metallic", Range(0,1)) = 0.0
-        _MapScale("Tiling Scale", Float) = 1
+        _MapScale ("Tiling Scale", Float) = 1
         _BumpMap ("Normal Map", 2D) = "bump" {}
-
-        _BumpScale("Normal Strength", Float) = 1
-        [PerRendererData]_WorldPos("WorldPos", Vector) = (0,0,0)
+        _BumpScale ("Normal Strength", Float) = 1
+        [PerRendererData]_WorldPos ("WorldPos", Vector) = (0,0,0)
     }
+
     SubShader
     {
-        Tags { "RenderType"="Opaque" "DisableBatching"="True" }
-        LOD 200
-
-        CGPROGRAM
-        // Physically based Standard lighting model, and enable shadows on all light types
-        #pragma surface surf Standard vertex:vert fullforwardshadows addshadow
-        #pragma multi_compile_instancing
-        // Use shader model 3.0 target, to get nicer looking lighting
-        #pragma target 4.0
-
-        struct Input
+        Tags
         {
-            float3 localCoord;
-            float3 localNormal;
-            float textureIndex;
-        };
-        struct output {
-            float4 vertex : POSITION;
-            float3 normal : NORMAL;
-            float4 tangent : TANGENT;
-            float textureIndex : TEXCOORD0;
-            UNITY_VERTEX_INPUT_INSTANCE_ID
-        };
-        half _Glossiness;
-        half _Metallic;
-        fixed4 _Color;
-        half _MapScale;
-        float _SliceRange;
-        half _BumpScale;
-        sampler2D _BumpMap;
-        
-        float4 _WorldPos;
-        UNITY_DECLARE_TEX2DARRAY(_MainTextures);
-        //UNITY_DECLARE_TEX2DARRAY(_BumpMaps);
+            "RenderType" = "Opaque"
+            "RenderPipeline" = "UniversalPipeline"
+            "UniversalMaterialType" = "Lit"
+        }
+        LOD 250
 
-        // Add instancing support for this shader. You need to check 'Enable Instancing' on materials that use the shader.
-        // See https://docs.unity3d.com/Manual/GPUInstancing.html for more information about instancing.
-        /*#pragma instancing_options assumeuniformscaling
-        UNITY_INSTANCING_BUFFER_START(Props)
-        UNITY_DEFINE_INSTANCED_PROP(int, _DirectionMask);
-            // put more per-instance properties here
-        UNITY_INSTANCING_BUFFER_END(Props)*/
-
-        void vert(inout output v, out Input data)
+        Pass
         {
-            UNITY_INITIALIZE_OUTPUT(Input, data);
-            data.localCoord = (_WorldPos.xyz + v.vertex.xyz);
-            data.localNormal = v.normal.xyz;
-            data.textureIndex = v.textureIndex * _SliceRange;
+            Name "ForwardLit"
+            Tags { "LightMode" = "UniversalForward" }
+            Cull Back
+            ZWrite On
+
+            HLSLPROGRAM
+            #pragma target 4.5
+            #pragma require 2darray
+            #pragma vertex vert
+            #pragma fragment frag
+            #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
+            #pragma multi_compile _ _ADDITIONAL_LIGHTS
+            #pragma multi_compile _ _ADDITIONAL_LIGHT_SHADOWS
+            #pragma multi_compile _ _SHADOWS_SOFT
+            #pragma multi_compile_fog
+
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
+
+            struct Attributes
+            {
+                float3 positionOS : POSITION;
+                float3 normalOS : NORMAL;
+                float textureIndex : TEXCOORD0;
+            };
+
+            struct Varyings
+            {
+                float4 positionCS : SV_POSITION;
+                float3 positionWS : TEXCOORD0;
+                float3 normalWS : TEXCOORD1;
+                float textureIndex : TEXCOORD2;
+                float4 shadowCoord : TEXCOORD3;
+                half fogFactor : TEXCOORD4;
+            };
+
+            CBUFFER_START(UnityPerMaterial)
+                half4 _Color;
+                half _Glossiness;
+                half _Metallic;
+                half _MapScale;
+                half _BumpScale;
+                float _SliceRange;
+                float4 _WorldPos;
+            CBUFFER_END
+
+            TEXTURE2D(_BumpMap);
+            SAMPLER(sampler_BumpMap);
+            TEXTURE2D_ARRAY(_MainTextures);
+            SAMPLER(sampler_MainTextures);
+
+            float3 GetBlendWeights(float3 normalWS)
+            {
+                float3 weights = abs(normalWS);
+                return weights / max(dot(weights, 1.0), 1e-5);
+            }
+
+            half3 SampleTriplanarAlbedo(float3 positionWS, float3 normalWS, float textureIndex)
+            {
+                float3 blend = GetBlendWeights(normalWS);
+                float slice = textureIndex * _SliceRange;
+
+                float2 uvX = positionWS.yz * _MapScale;
+                float2 uvY = positionWS.zx * _MapScale;
+                float2 uvZ = positionWS.xy * _MapScale;
+
+                half3 x = SAMPLE_TEXTURE2D_ARRAY(_MainTextures, sampler_MainTextures, uvX, slice).rgb;
+                half3 y = SAMPLE_TEXTURE2D_ARRAY(_MainTextures, sampler_MainTextures, uvY, slice).rgb;
+                half3 z = SAMPLE_TEXTURE2D_ARRAY(_MainTextures, sampler_MainTextures, uvZ, slice).rgb;
+
+                return (x * blend.x + y * blend.y + z * blend.z) * _Color.rgb;
+            }
+
+            half3 SampleTriplanarNormalWS(float3 positionWS, float3 normalWS)
+            {
+                float3 blend = GetBlendWeights(normalWS);
+                float3 normalSign = sign(normalWS);
+
+                float2 uvX = positionWS.yz * _MapScale;
+                float2 uvY = positionWS.zx * _MapScale;
+                float2 uvZ = positionWS.xy * _MapScale;
+
+                half3 normalX = UnpackNormalScale(SAMPLE_TEXTURE2D(_BumpMap, sampler_BumpMap, uvX), _BumpScale);
+                half3 normalY = UnpackNormalScale(SAMPLE_TEXTURE2D(_BumpMap, sampler_BumpMap, uvY), _BumpScale);
+                half3 normalZ = UnpackNormalScale(SAMPLE_TEXTURE2D(_BumpMap, sampler_BumpMap, uvZ), _BumpScale);
+
+                half3 worldX = half3(normalSign.x * normalX.z, normalX.y, normalX.x);
+                half3 worldY = half3(normalY.x, normalSign.y * normalY.z, normalY.y);
+                half3 worldZ = half3(normalZ.x, normalZ.y, normalSign.z * normalZ.z);
+
+                return normalize(worldX * blend.x + worldY * blend.y + worldZ * blend.z);
+            }
+
+            half3 EvaluateLight(Light light, half3 albedo, half3 normalWS, half3 viewDirectionWS)
+            {
+                half attenuation = light.distanceAttenuation * light.shadowAttenuation;
+                half3 diffuse = LightingLambert(light.color * attenuation, light.direction, normalWS) * albedo;
+                half3 specular = LightingSpecular(
+                    light.color * attenuation,
+                    light.direction,
+                    normalWS,
+                    viewDirectionWS,
+                    half4(_Metallic.xxx, 1.0h),
+                    saturate(_Glossiness)
+                );
+
+                return diffuse + specular;
+            }
+
+            Varyings vert(Attributes IN)
+            {
+                Varyings OUT;
+
+                VertexPositionInputs positionInputs = GetVertexPositionInputs(IN.positionOS);
+                VertexNormalInputs normalInputs = GetVertexNormalInputs(IN.normalOS);
+
+                OUT.positionWS = positionInputs.positionWS;
+                OUT.positionCS = positionInputs.positionCS;
+                OUT.normalWS = normalize(normalInputs.normalWS);
+                OUT.textureIndex = IN.textureIndex;
+                OUT.shadowCoord = GetShadowCoord(positionInputs);
+                OUT.fogFactor = ComputeFogFactor(positionInputs.positionCS.z);
+
+                return OUT;
+            }
+
+            half4 frag(Varyings IN) : SV_Target
+            {
+                half3 normalWS = SampleTriplanarNormalWS(IN.positionWS, normalize(IN.normalWS));
+                half3 albedo = SampleTriplanarAlbedo(IN.positionWS, normalWS, IN.textureIndex);
+                half3 viewDirectionWS = SafeNormalize(GetWorldSpaceViewDir(IN.positionWS));
+
+                Light mainLight = GetMainLight(IN.shadowCoord);
+                half3 color = SampleSH(normalWS) * albedo;
+                color += EvaluateLight(mainLight, albedo, normalWS, viewDirectionWS);
+
+                #if defined(_ADDITIONAL_LIGHTS)
+                uint additionalLightCount = GetAdditionalLightsCount();
+                for (uint lightIndex = 0u; lightIndex < additionalLightCount; ++lightIndex)
+                {
+                    Light additionalLight = GetAdditionalLight(lightIndex, IN.positionWS);
+                    color += EvaluateLight(additionalLight, albedo, normalWS, viewDirectionWS);
+                }
+                #endif
+
+                color = MixFog(color, IN.fogFactor);
+                return half4(color, 1.0h);
+            }
+            ENDHLSL
         }
 
-        void surf (Input IN, inout SurfaceOutputStandard o)
+        Pass
         {
-            // Albedo comes from a texture tinted by color
-            //fixed4 c = tex2D (_MainTex, IN.uv_MainTex) * _Color;
-            // Blending factor of triplanar mapping
-            float3 bf = abs(IN.localNormal);
-            bf /= dot(bf, (float3)1);
-        
-            // Triplanar mapping
-            float2 tx = IN.localCoord.yz * _MapScale;
-            float2 ty = IN.localCoord.zx * _MapScale;
-            float2 tz = IN.localCoord.xy * _MapScale;
+            Name "ShadowCaster"
+            Tags { "LightMode" = "ShadowCaster" }
+            Cull Back
+            ZWrite On
+            ZTest LEqual
 
-            // Base color
-            half4 cx = UNITY_SAMPLE_TEX2DARRAY(_MainTextures, float3(tx, IN.textureIndex)) * bf.x;
-            half4 cy = UNITY_SAMPLE_TEX2DARRAY(_MainTextures, float3(ty, IN.textureIndex)) * bf.y;
-            half4 cz = UNITY_SAMPLE_TEX2DARRAY(_MainTextures, float3(tz, IN.textureIndex)) * bf.z;
-            half4 color = (cx + cy + cz) * _Color;
-            o.Albedo = color.rgb;
-            //o.Alpha = color.a;
-            // Metallic and smoothness come from slider variables
-            o.Metallic = _Metallic;
-            o.Smoothness = _Glossiness;
-            // Normal map
-            half4 nx = tex2D(_BumpMap, tx) * bf.x;
-            half4 ny = tex2D(_BumpMap, ty) * bf.y;
-            half4 nz = tex2D(_BumpMap, tz) * bf.z;
-            o.Normal = UnpackScaleNormal(nx + ny + nz, _BumpScale);
+            HLSLPROGRAM
+            #pragma target 4.5
+            #pragma vertex vert
+            #pragma fragment frag
+
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+
+            struct Attributes
+            {
+                float3 positionOS : POSITION;
+            };
+
+            struct Varyings
+            {
+                float4 positionCS : SV_POSITION;
+            };
+
+            Varyings vert(Attributes IN)
+            {
+                Varyings OUT;
+                OUT.positionCS = TransformObjectToHClip(IN.positionOS);
+                return OUT;
+            }
+
+            half4 frag() : SV_Target
+            {
+                return 0;
+            }
+            ENDHLSL
         }
-        ENDCG
+
+        Pass
+        {
+            Name "DepthOnly"
+            Tags { "LightMode" = "DepthOnly" }
+            Cull Back
+            ZWrite On
+            ColorMask 0
+
+            HLSLPROGRAM
+            #pragma target 4.5
+            #pragma vertex vert
+            #pragma fragment frag
+
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+
+            struct Attributes
+            {
+                float3 positionOS : POSITION;
+            };
+
+            struct Varyings
+            {
+                float4 positionCS : SV_POSITION;
+            };
+
+            Varyings vert(Attributes IN)
+            {
+                Varyings OUT;
+                OUT.positionCS = TransformObjectToHClip(IN.positionOS);
+                return OUT;
+            }
+
+            half4 frag() : SV_Target
+            {
+                return 0;
+            }
+            ENDHLSL
+        }
     }
-    FallBack "Diffuse"
 }

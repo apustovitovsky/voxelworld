@@ -4,141 +4,173 @@ Shader "Unlit/GrassBladeIndirect"
     {
         _MainTex ("Main Tex", 2D) = "white" {}
         _TextureStrength("Texture Strength", Range(0,1)) = 0
-        _PrimaryCol ("Primary Color", Color) = (1, 1, 1)
-        _SecondaryCol ("Secondary Color", Color) = (1, 0, 1)
-        _AOColor ("AO Color", Color) = (1, 0, 1)
-        _TipColor ("Tip Color", Color) = (0, 0, 1)
+        _PrimaryCol ("Primary Color", Color) = (1, 1, 1, 1)
+        _SecondaryCol ("Secondary Color", Color) = (1, 0, 1, 1)
+        _AOColor ("AO Color", Color) = (1, 0, 1, 1)
+        _TipColor ("Tip Color", Color) = (0, 0, 1, 1)
         _Scale ("Scale", Range(0.0, 2.0)) = 0.0
         _Cutoff ("Cutoff", Range(0,1)) = 0.5
     }
+
     SubShader
     {
-
-        Pass
+        Tags
         {
-            Tags { "RenderType"="Opaque" "LightMode"="ForwardBase" }
-            LOD 100
-            Cull Back
-            CGPROGRAM
-            #pragma vertex vert
-            #pragma fragment frag
-            // make fog work
-            #pragma multi_compile_instancing
-			#pragma target 4.5
-
-            #include "UnityCG.cginc"
-            #include "Lighting.cginc"
-            #pragma multi_compile_fwdbase nolightmap nodirlightmap nodynlightmap novertexlight
-            #include "AutoLight.cginc"
-            
-            
-
-            struct appdata
-            {
-                float4 vertex : POSITION;
-                float2 uv : TEXCOORD0;
-                float3 normal : NORMAL;
-            };
-
-            struct v2f
-            {
-                float2 uv : TEXCOORD0;
-                float4 pos : SV_POSITION;
-                fixed4 diff : COLOR0; // diffuse lighting color
-                fixed3 ambient : COLOR1;
-                LIGHTING_COORDS(1,2)
-            };
-
-            
-
-            StructuredBuffer<float4x4> Matrices;
-            sampler2D _MainTex;
-            float4 _MainTex_ST;
-            float4 _PrimaryCol, _SecondaryCol, _AOColor, _TipColor;
-            float _Scale;
-            float _Cutoff;
-            float _TextureStrength;
-
-            v2f vert (appdata v, uint instanceID : SV_InstanceID)
-            {
-
-                v2f o;
-                
-                unity_ObjectToWorld = Matrices[instanceID];
-                float3 positionWorldSpace = mul(Matrices[instanceID], float4(v.vertex.xyz, 1));
-                float3 normalWorldSpace = mul(v.normal, transpose(Matrices[instanceID]));
-                o.uv = v.uv;
-                o.pos = mul(UNITY_MATRIX_VP, float4(positionWorldSpace, 1));
-                half nl = max(0, dot(normalWorldSpace, _WorldSpaceLightPos0.xyz));
-                o.diff = nl * _LightColor0;
-                o.ambient = ShadeSH9(half4(normalWorldSpace,1));
-                TRANSFER_SHADOW(o)
-                return o;
-            }
-
-            fixed4 frag (v2f i) : SV_Target
-            {
-                fixed4 albedo = tex2D(_MainTex, i.uv);
-                clip(albedo.a - _Cutoff);
-                float4 col = lerp(_PrimaryCol, _SecondaryCol, i.uv.y);
-                float a = SHADOW_ATTENUATION(i);
-                fixed3 lighting = i.diff * a + i.ambient * clamp(a, 0.5,1);
-                float4 ao = lerp(_AOColor, 1.0f, i.uv.y);
-                float4 tip = lerp(0.0f, _TipColor, i.uv.y * i.uv.y * (1.0f + _Scale));
-                float4 grassColor = lerp(col + tip, albedo, _TextureStrength) * float4(lighting,1) * ao;
-                return grassColor;
-            }
-            ENDCG
+            "RenderType" = "TransparentCutout"
+            "Queue" = "AlphaTest"
+            "RenderPipeline" = "UniversalPipeline"
         }
+
         Pass
         {
-            
-            Tags {"LightMode"="ShadowCaster"}
-            LOD 100
+            Name "ForwardLit"
+            Tags { "LightMode" = "UniversalForward" }
             Cull Back
+            ZWrite On
 
-            CGPROGRAM
+            HLSLPROGRAM
+            #pragma target 4.5
             #pragma vertex vert
             #pragma fragment frag
-            #pragma multi_compile_shadowcaster
-            #pragma multi_compile_instancing
-			#pragma target 4.5
-            #include "UnityCG.cginc"
+            #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
+            #pragma multi_compile_fog
 
-            
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
+
+            struct Attributes
+            {
+                float3 positionOS : POSITION;
+                float2 uv : TEXCOORD0;
+                float3 normalOS : NORMAL;
+            };
+
+            struct Varyings
+            {
+                float2 uv : TEXCOORD0;
+                float4 positionCS : SV_POSITION;
+                float3 normalWS : TEXCOORD1;
+                float3 positionWS : TEXCOORD2;
+                float4 shadowCoord : TEXCOORD3;
+                half fogFactor : TEXCOORD4;
+            };
+
             StructuredBuffer<float4x4> Matrices;
 
-            struct appdata
-            {
-                float4 vertex : POSITION;
-                float2 uv : TEXCOORD0;
-                float3 normal : NORMAL;
-            };
+            TEXTURE2D(_MainTex);
+            SAMPLER(sampler_MainTex);
 
-            struct v2f {
-                float2 uv : TEXCOORD0;
-                V2F_SHADOW_CASTER;
-            };
-            
-            sampler2D _MainTex;
-            float _Cutoff;
+            CBUFFER_START(UnityPerMaterial)
+                float4 _MainTex_ST;
+                half4 _PrimaryCol;
+                half4 _SecondaryCol;
+                half4 _AOColor;
+                half4 _TipColor;
+                half _Scale;
+                half _Cutoff;
+                half _TextureStrength;
+            CBUFFER_END
 
-            v2f vert(appdata v, uint instanceID : SV_InstanceID)
+            Varyings vert(Attributes IN, uint instanceID : SV_InstanceID)
             {
-                v2f o;
-                o.uv = v.uv;
-                unity_ObjectToWorld = Matrices[instanceID];
-                TRANSFER_SHADOW_CASTER_NORMALOFFSET(o)
-                return o;
+                Varyings OUT;
+
+                float4x4 instanceMatrix = Matrices[instanceID];
+                float3 positionWS = mul(instanceMatrix, float4(IN.positionOS, 1.0)).xyz;
+                float3 normalWS = normalize(mul((float3x3)instanceMatrix, IN.normalOS));
+
+                VertexPositionInputs positionInputs = GetVertexPositionInputs(positionWS);
+
+                OUT.uv = TRANSFORM_TEX(IN.uv, _MainTex);
+                OUT.positionCS = positionInputs.positionCS;
+                OUT.positionWS = positionWS;
+                OUT.normalWS = normalWS;
+                OUT.shadowCoord = GetShadowCoord(positionInputs);
+                OUT.fogFactor = ComputeFogFactor(positionInputs.positionCS.z);
+
+                return OUT;
             }
 
-            fixed4 frag(v2f i) : SV_Target
+            half4 frag(Varyings IN) : SV_Target
             {
-                fixed4 albedo = tex2D(_MainTex, i.uv);
+                half4 albedo = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, IN.uv);
                 clip(albedo.a - _Cutoff);
-                SHADOW_CASTER_FRAGMENT(i)
+
+                half4 baseCol = lerp(_PrimaryCol, _SecondaryCol, IN.uv.y);
+                half4 ao = lerp(_AOColor, half4(1, 1, 1, 1), IN.uv.y);
+                half4 tip = lerp(half4(0, 0, 0, 0), _TipColor, IN.uv.y * IN.uv.y * (1.0h + _Scale));
+                half3 surfaceColor = lerp((baseCol + tip).rgb, albedo.rgb, _TextureStrength) * ao.rgb;
+
+                half3 normalWS = normalize(IN.normalWS);
+                Light mainLight = GetMainLight(IN.shadowCoord);
+                half ndotl = saturate(dot(normalWS, mainLight.direction));
+                half3 ambient = SampleSH(normalWS);
+                half3 diffuse = mainLight.color * (mainLight.distanceAttenuation * mainLight.shadowAttenuation * ndotl);
+
+                half3 color = surfaceColor * (ambient + diffuse);
+                color = MixFog(color, IN.fogFactor);
+                return half4(color, 1.0h);
             }
-            ENDCG
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "ShadowCaster"
+            Tags { "LightMode" = "ShadowCaster" }
+            Cull Back
+            ZWrite On
+            ZTest LEqual
+
+            HLSLPROGRAM
+            #pragma target 4.5
+            #pragma vertex vert
+            #pragma fragment frag
+
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+
+            struct Attributes
+            {
+                float3 positionOS : POSITION;
+                float2 uv : TEXCOORD0;
+                float3 normalOS : NORMAL;
+            };
+
+            struct Varyings
+            {
+                float2 uv : TEXCOORD0;
+                float4 positionCS : SV_POSITION;
+            };
+
+            StructuredBuffer<float4x4> Matrices;
+
+            TEXTURE2D(_MainTex);
+            SAMPLER(sampler_MainTex);
+
+            CBUFFER_START(UnityPerMaterial)
+                float4 _MainTex_ST;
+                half _Cutoff;
+            CBUFFER_END
+
+            Varyings vert(Attributes IN, uint instanceID : SV_InstanceID)
+            {
+                Varyings OUT;
+
+                float4x4 instanceMatrix = Matrices[instanceID];
+                float3 positionWS = mul(instanceMatrix, float4(IN.positionOS, 1.0)).xyz;
+
+                OUT.uv = TRANSFORM_TEX(IN.uv, _MainTex);
+                OUT.positionCS = TransformWorldToHClip(positionWS);
+                return OUT;
+            }
+
+            half4 frag(Varyings IN) : SV_Target
+            {
+                half4 albedo = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, IN.uv);
+                clip(albedo.a - _Cutoff);
+                return 0;
+            }
+            ENDHLSL
         }
     }
 }
