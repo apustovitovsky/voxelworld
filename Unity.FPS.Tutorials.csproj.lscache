@@ -319,14 +319,14 @@ Temp/obj/Unity.FPS.Tutorials/.NETStandard,Version=v2.1.AssemblyAttributes.cs
  Extensions/2.0.0/System.Runtime.InteropServices.WindowsRuntime.dll
  ref/2.1.0/netstandard.dll
 ../../../../../Program Files/Unity/Hub/Editor/6000.4.7f1/Editor/Data/PlaybackEngines/WindowsStandaloneSupport/UnityEditor.WindowsStandalone.Extensions.dll
-Library/PackageCache/com.unity.collections@5b6ebd78ccc0/
- Unity.Collections.LowLevel.ILSupport/Unity.Collections.LowLevel.ILSupport.dll
- Unity.Collections.Tests/
-  System.IO.Hashing/System.IO.Hashing.dll
-  System.Runtime.CompilerServices.Unsafe/System.Runtime.CompilerServices.Unsafe.dll
 Library/PackageCache/
+ com.unity.ai.assistant@667f49aff9c0/Modules/Unity.AI.Toolkit.Sdk/Editor/AiEditorToolsSdk.dll
+ com.unity.collections@5b6ebd78ccc0/
+  Unity.Collections.LowLevel.ILSupport/Unity.Collections.LowLevel.ILSupport.dll
+  Unity.Collections.Tests/System.IO.Hashing/System.IO.Hashing.dll
  com.unity.ext.nunit@d8c07649098d/net40/unity-custom/nunit.framework.dll
  com.unity.nuget.mono-cecil@ecb9724e46ff/Mono.Cecil.dll
+ com.unity.nuget.newtonsoft-json@4dfd81071c64/Runtime/Newtonsoft.Json.dll
  com.unity.testtools.codecoverage@19a841221620/lib/ReportGenerator/ReportGeneratorMerged.dll
 Library/ScriptAssemblies/
  Unity.AI.Navigation.dll
